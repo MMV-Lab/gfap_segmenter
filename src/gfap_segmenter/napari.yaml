@@ -1,0 +1,50 @@
+name: gfap-segmenter
+display_name: Gfap Segmenter
+# use 'hidden' to remove plugin from napari hub search results
+visibility: public
+# see https://napari.org/stable/plugins/technical_references/manifest.html#fields for valid categories
+# categories: []
+contributions:
+  commands:
+    - id: gfap-segmenter.get_reader
+      python_name: gfap_segmenter._reader:napari_get_reader
+      title: Open data with Gfap Segmenter
+    - id: gfap-segmenter.write_multiple
+      python_name: gfap_segmenter._writer:write_multiple
+      title: Save multi-layer data with Gfap Segmenter
+    - id: gfap-segmenter.write_single_image
+      python_name: gfap_segmenter._writer:write_single_image
+      title: Save image data with Gfap Segmenter
+    - id: gfap-segmenter.make_container_widget
+      python_name: gfap_segmenter:ImageThreshold
+      title: Make threshold Container widget
+    - id: gfap-segmenter.make_magic_widget
+      python_name: gfap_segmenter:threshold_magic_widget
+      title: Make threshold magic widget
+    - id: gfap-segmenter.make_function_widget
+      python_name: gfap_segmenter:threshold_autogenerate_widget
+      title: Make threshold function widget
+    - id: gfap-segmenter.make_qwidget
+      python_name: gfap_segmenter:ExampleQWidget
+      title: Make example QWidget
+  readers:
+    - command: gfap-segmenter.get_reader
+      accepts_directories: false
+      filename_patterns: ['*.npy']
+  writers:
+    - command: gfap-segmenter.write_multiple
+      layer_types: ['image*','labels*']
+      filename_extensions: []
+    - command: gfap-segmenter.write_single_image
+      layer_types: ['image']
+      filename_extensions: ['.npy']
+  widgets:
+    - command: gfap-segmenter.make_container_widget
+      display_name: Container Threshold
+    - command: gfap-segmenter.make_magic_widget
+      display_name: Magic Threshold
+    - command: gfap-segmenter.make_function_widget
+      autogenerate: true
+      display_name: Autogenerate Threshold
+    - command: gfap-segmenter.make_qwidget
+      display_name: Example QWidget
