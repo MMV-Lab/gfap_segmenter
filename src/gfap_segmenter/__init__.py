@@ -5,20 +5,36 @@ except ImportError:
 
 
 from ._reader import napari_get_reader
-from ._widget import (
-    ExampleQWidget,
-    ImageThreshold,
-    threshold_autogenerate_widget,
-    threshold_magic_widget,
+from ._widget import SegmenterWidget
+from ._writer import (
+    export_model_bundle,
+    import_model_bundle,
+    write_multiple,
+    write_single_image,
 )
-from ._writer import write_multiple, write_single_image
+from .background import BackgroundExecutor
+from .data_utils import (
+    CuratedPatch,
+    PatchDataset,
+    ensure_min_patch_size,
+    extract_patch_from_layers,
+    generate_augmented_patches,
+)
+from .model_manager import ModelManager, PredictionResult
 
 __all__ = (
     "napari_get_reader",
     "write_single_image",
     "write_multiple",
-    "ExampleQWidget",
-    "ImageThreshold",
-    "threshold_autogenerate_widget",
-    "threshold_magic_widget",
+    "export_model_bundle",
+    "import_model_bundle",
+    "ModelManager",
+    "PredictionResult",
+    "BackgroundExecutor",
+    "CuratedPatch",
+    "PatchDataset",
+    "ensure_min_patch_size",
+    "extract_patch_from_layers",
+    "generate_augmented_patches",
+    "SegmenterWidget",
 )

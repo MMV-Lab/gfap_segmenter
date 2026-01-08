@@ -9,42 +9,32 @@ contributions:
     - id: gfap-segmenter.get_reader
       python_name: gfap_segmenter._reader:napari_get_reader
       title: Open data with Gfap Segmenter
+    - id: gfap-segmenter.export_model_bundle
+      python_name: gfap_segmenter._writer:export_model_bundle
+      title: Export GFAP model bundle
+    - id: gfap-segmenter.import_model_bundle
+      python_name: gfap_segmenter._writer:import_model_bundle
+      title: Import GFAP model bundle
     - id: gfap-segmenter.write_multiple
       python_name: gfap_segmenter._writer:write_multiple
       title: Save multi-layer data with Gfap Segmenter
     - id: gfap-segmenter.write_single_image
       python_name: gfap_segmenter._writer:write_single_image
       title: Save image data with Gfap Segmenter
-    - id: gfap-segmenter.make_container_widget
-      python_name: gfap_segmenter:ImageThreshold
-      title: Make threshold Container widget
-    - id: gfap-segmenter.make_magic_widget
-      python_name: gfap_segmenter:threshold_magic_widget
-      title: Make threshold magic widget
-    - id: gfap-segmenter.make_function_widget
-      python_name: gfap_segmenter:threshold_autogenerate_widget
-      title: Make threshold function widget
-    - id: gfap-segmenter.make_qwidget
-      python_name: gfap_segmenter:ExampleQWidget
-      title: Make example QWidget
+    - id: gfap-segmenter.make_segmenter_widget
+      python_name: gfap_segmenter:SegmenterWidget
+      title: GFAP Segmenter
   readers:
     - command: gfap-segmenter.get_reader
       accepts_directories: false
-      filename_patterns: ['*.npy']
+      filename_patterns: ['*.tif', '*.tiff', '*.czi']
   writers:
     - command: gfap-segmenter.write_multiple
       layer_types: ['image*','labels*']
-      filename_extensions: []
+      filename_extensions: ['.tif', '.tiff', '.npy']
     - command: gfap-segmenter.write_single_image
       layer_types: ['image']
-      filename_extensions: ['.npy']
+      filename_extensions: ['.tif', '.tiff', '.npy']
   widgets:
-    - command: gfap-segmenter.make_container_widget
-      display_name: Container Threshold
-    - command: gfap-segmenter.make_magic_widget
-      display_name: Magic Threshold
-    - command: gfap-segmenter.make_function_widget
-      autogenerate: true
-      display_name: Autogenerate Threshold
-    - command: gfap-segmenter.make_qwidget
-      display_name: Example QWidget
+    - command: gfap-segmenter.make_segmenter_widget
+      display_name: GFAP Segmenter
