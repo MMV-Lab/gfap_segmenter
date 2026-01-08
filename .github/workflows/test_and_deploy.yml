@@ -22,10 +22,11 @@ jobs:
 
   deploy:
     # this will run when you have tagged a commit, starting with "v*"
-    # and requires that you have put your twine API key in your
-    # github secrets (see readme for details)
+    # and requires that you have set up trusted publishing on PyPI
     needs: [build-and-inspect-package]
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
     permissions:
       id-token: write
     steps:
