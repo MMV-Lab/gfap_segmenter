@@ -15,7 +15,7 @@ A Bachelor Thesis project to allow segmentation of astrocytes on GFAP staining u
 ## Features
 - Load `.tif/.tiff/.czi` microscopy data via **bioio** and display them in napari.
 - Run tiled U-Net inference that produces probability maps and binary masks.
-- Curate training patches with ≥300×300 validation and immediate colour feedback.
+- Curate training patches with ≥256×256 validation and immediate colour feedback.
 - Synthesize 1000 augmented patches per curated region and train in the background with progress updates.
 - Import/export checkpoints (including ONNX) and optionally bundle curated training data.
 
@@ -176,7 +176,7 @@ pip install git+https://github.com/MMV-Lab/gfap-segmenter.git
 
 ## Usage overview
 1. **Prediction tab** – load the default checkpoint or import a custom one, choose an image layer, and run inference to create probability and mask layers.
-2. **Curate Patches tab** – draw rectangles in the dedicated shapes layer. Patches ≥300×300 are tinted blue; smaller ones are red. Add valid regions to the training set.
+2. **Curate Patches tab** – draw rectangles in the dedicated shapes layer. Patches ≥256×256 are tinted blue; smaller ones are red. Add valid regions to the training set.
 3. **Train tab** – launch background training; progress and logs stream into the widget. Trained models are stored under `~/.gfap_segmenter/models`.
 4. **Model IO tab** – export/import checkpoint bundles. Bundles can optionally include the curated training data for reproducibility.
 

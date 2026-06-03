@@ -79,7 +79,7 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/gfap_segmenter/_version.py"
-fallback_version = "0.0.1+nogit"
+fallback_version = "1.0.1rc1"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

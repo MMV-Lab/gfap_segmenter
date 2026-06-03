@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
 from skimage.util import view_as_windows
 from tqdm import tqdm
 
-MIN_PATCH_SIZE = 300
+MIN_PATCH_SIZE = 256
 DEFAULT_PATCHES_PER_REGION = 1000
 
 
@@ -20,12 +20,36 @@ class CuratedPatch:
     labels: np.ndarray
     origin: Tuple[int, int]
     scale: float
+    # Min/max of the full source channel; used to match inference normalization.
+    image_norm_min: Optional[float] = None
+    image_norm_max: Optional[float] = None
 
 
 def ensure_min_patch_size(
     width: int, height: int, min_size: int = MIN_PATCH_SIZE
 ) -> bool:
     return width >= min_size and height >= min_size
+
+
+def normalize_image(
+    image: np.ndarray,
+    *,
+    image_min: Optional[float] = None,
+    image_max: Optional[float] = None,
+) -> np.ndarray:
+    """Scale image to [0, 1] using min–max (matches ``ModelManager.predict``).
+
+    When ``image_min`` / ``image_max`` are provided they are used as the range
+    (full-field normalization). Otherwise the range is taken from ``image``.
+    """
+    image = np.asarray(image, dtype=np.float32)
+    if image_min is None:
+        image_min = float(image.min())
+    if image_max is None:
+        image_max = float(image.max())
+    if image_max > image_min:
+        return (image - image_min) / (image_max - image_min)
+    return image
 
 
 def extract_patch_from_layers(
@@ -43,6 +67,8 @@ def extract_patch_from_layers(
         labels=patch_labels.copy(),
         origin=(y0, x0),
         scale=1.0,
+        image_norm_min=float(image.min()),
+        image_norm_max=float(image.max()),
     )
 
 
@@ -57,9 +83,16 @@ def generate_augmented_patches(
     The function returns two arrays with shapes ``(N, patch_size, patch_size)`` for
     images and masks respectively. Augmentations include random cropping,
     horizontal/vertical flips, and rotations in 90° increments.
+
+    Images are normalized to [0, 1] using the full source channel min/max stored
+    on the curated patch (same as ``ModelManager.predict`` on the full image).
     """
 
-    img = curated_patch.image
+    img = normalize_image(
+        curated_patch.image,
+        image_min=curated_patch.image_norm_min,
+        image_max=curated_patch.image_norm_max,
+    )
     msk = curated_patch.labels
 
     if img.shape[0] < patch_size or img.shape[1] < patch_size:

@@ -16,6 +16,81 @@ from tqdm import tqdm
 from .data_utils import CuratedPatch, PatchDataset, generate_augmented_patches
 from .model_manager import ModelManager, UNet
 
+try:
+    import tifffile
+except ImportError:  # pragma: no cover
+    tifffile = None  # type: ignore[assignment]
+
+
+def export_training_samples(
+    patches: List[CuratedPatch],
+    output_dir: Path | str,
+    *,
+    samples_per_region: int = 25,
+    progress_callback: Callable[[float], None] | None = None,
+) -> Path:
+    """Write augmented training patches to disk for visual inspection (debug).
+
+    Creates ``region_XX/sample_YYYY_image.tif`` and matching ``_mask.tif`` files
+    using the same pipeline as training (ROI normalization + augmentations).
+    """
+    if tifffile is None:
+        raise ImportError("tifffile is required to export training samples")
+
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    patches_list = list(patches)
+    if not patches_list:
+        raise ValueError("No curated patches to export")
+
+    manifest_lines = [
+        "# GFAP segmenter training sample export",
+        f"samples_per_region={samples_per_region}",
+        "",
+    ]
+
+    for region_idx, patch in enumerate(patches_list, start=1):
+        if progress_callback:
+            progress_callback((region_idx - 1) / len(patches_list))
+
+        images, masks = generate_augmented_patches(patch)
+        n_total = len(images)
+        if samples_per_region > 0 and samples_per_region < n_total:
+            rng = np.random.default_rng(0)
+            pick = rng.choice(n_total, size=samples_per_region, replace=False)
+            images = images[pick]
+            masks = masks[pick]
+
+        region_dir = destination / f"region_{region_idx:02d}"
+        region_dir.mkdir(exist_ok=True)
+
+        fg_ratios: list[float] = []
+        for sample_idx, (img, msk) in enumerate(
+            zip(images, masks, strict=True)
+        ):
+            stem = f"sample_{sample_idx:04d}"
+            tifffile.imwrite(region_dir / f"{stem}_image.tif", img)
+            tifffile.imwrite(
+                region_dir / f"{stem}_mask.tif", msk.astype(np.uint8)
+            )
+            fg_ratios.append(float(np.mean(msk > 0)))
+
+        manifest_lines.append(
+            f"region_{region_idx:02d}: curated_shape={patch.image.shape}, "
+            f"exported={len(images)}/{n_total}, "
+            f"fg_fraction_mean={np.mean(fg_ratios):.4f}, "
+            f"origin={patch.origin}, "
+            f"norm_min={patch.image_norm_min}, norm_max={patch.image_norm_max}"
+        )
+
+    if progress_callback:
+        progress_callback(1.0)
+
+    manifest_path = destination / "manifest.txt"
+    manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+    return destination
+
 
 class TrainingManager:
     def __init__(self, model_manager: ModelManager) -> None:

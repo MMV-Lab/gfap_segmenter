@@ -48,6 +48,73 @@ VALID_PATCH_COLOR = [0.0, 0.4, 1.0, 0.25]
 INVALID_PATCH_COLOR = [1.0, 0.1, 0.1, 0.25]
 
 
+def _get_layer_channel_info(
+    layer: napari.layers.Image,
+) -> tuple[bool, int, list | None]:
+    """Return ``(is_multi_channel, num_channels, channel_names)`` for a layer."""
+    data = np.asarray(layer.data)
+    channel_names = layer.metadata.get("channel_names")
+    if channel_names is None:
+        nested = layer.metadata.get("metadata")
+        if isinstance(nested, dict):
+            channel_names = nested.get("channel_names")
+    channel_axis = layer.metadata.get("channel_axis")
+
+    is_multi_channel = False
+    num_channels = 0
+    if channel_axis is not None and channel_axis < data.ndim:
+        num_channels = int(data.shape[channel_axis])
+        is_multi_channel = num_channels > 1
+    elif channel_names and len(channel_names) > 1:
+        num_channels = len(channel_names)
+        is_multi_channel = num_channels > 1
+        if data.ndim >= 3 and data.shape[0] == num_channels:
+            pass
+    elif data.ndim == 3 and data.shape[0] <= 10:
+        num_channels = int(data.shape[0])
+        is_multi_channel = num_channels > 1
+
+    if channel_names is not None:
+        channel_names = list(channel_names)
+    return is_multi_channel, num_channels, channel_names
+
+
+def _populate_channel_combo(
+    channel_combo: QComboBox,
+    layer: napari.layers.Image | None,
+    *,
+    preserve_index: int | None = None,
+) -> None:
+    """Fill a channel combo for ``layer``, optionally keeping the same index."""
+    channel_combo.blockSignals(True)
+    channel_combo.clear()
+
+    if layer is None:
+        channel_combo.setEnabled(False)
+        channel_combo.blockSignals(False)
+        return
+
+    is_multi_channel, num_channels, channel_names = _get_layer_channel_info(
+        layer
+    )
+
+    if is_multi_channel:
+        channel_combo.setEnabled(True)
+        for i in range(num_channels):
+            if channel_names and i < len(channel_names):
+                channel_combo.addItem(f"{i}: {channel_names[i]}")
+            else:
+                channel_combo.addItem(f"Channel {i}")
+    else:
+        channel_combo.setEnabled(False)
+        channel_combo.addItem("Single channel")
+
+    if preserve_index is not None and 0 <= preserve_index < channel_combo.count():
+        channel_combo.setCurrentIndex(preserve_index)
+
+    channel_combo.blockSignals(False)
+
+
 def show_error_dialog(
     parent: QWidget,
     title: str,
@@ -345,66 +412,38 @@ class PredictionTab(QWidget):
         self.load_model_btn.clicked.connect(self._load_custom_model)
         self.predict_btn.clicked.connect(self._run_prediction)
         self.layer_combo.currentTextChanged.connect(self._on_layer_changed)
+        self._last_prediction_input: dict[str, str | int] = {}
         self.refresh_layers()
 
     def refresh_layers(self) -> None:
-        current = self.layer_combo.currentText()
+        previous_layer = self.layer_combo.currentText()
+        previous_channel = self.channel_combo.currentIndex()
+
         self.layer_combo.blockSignals(True)
         self.layer_combo.clear()
         for layer in self.parent_widget.get_image_layers():
             self.layer_combo.addItem(layer.name)
-        index = self.layer_combo.findText(current)
+        index = self.layer_combo.findText(previous_layer)
         if index >= 0:
             self.layer_combo.setCurrentIndex(index)
         self.layer_combo.blockSignals(False)
-        self._on_layer_changed()  # Update channel selection
 
-    def _on_layer_changed(self) -> None:
-        """Update channel selection when layer changes."""
-        layer = self._selected_layer()
-        self.channel_combo.blockSignals(True)
-        self.channel_combo.clear()
+        current_layer = self.layer_combo.currentText()
+        layer_changed = current_layer != previous_layer
+        preserve_channel = None if layer_changed else previous_channel
+        _populate_channel_combo(
+            self.channel_combo,
+            self._selected_layer(),
+            preserve_index=preserve_channel,
+        )
 
-        if layer is None:
-            self.channel_combo.setEnabled(False)
-            self.channel_combo.blockSignals(False)
-            return
-
-        data = np.asarray(layer.data)
-        # channel_names is stored directly in metadata (napari flattens nested structure)
-        channel_names = layer.metadata.get("channel_names")
-        channel_axis = layer.metadata.get("channel_axis", None)
-
-        # Check if this is a multi-channel image
-        # Match the logic in extract_channel for consistency
-        # Single-channel images are treated as if the selected channel (the only channel) is used
-        is_multi_channel = False
-        num_channels = 0
-        if channel_axis is not None and channel_axis < data.ndim:
-            num_channels = data.shape[channel_axis]
-            is_multi_channel = num_channels > 1
-        elif channel_names and len(channel_names) > 1:
-            num_channels = len(channel_names)
-            is_multi_channel = num_channels > 1
-        elif data.ndim == 3 and data.shape[0] <= 10:
-            # 3D data with small first dimension - likely channels
-            num_channels = data.shape[0]
-            is_multi_channel = num_channels > 1
-
-        if is_multi_channel:
-            self.channel_combo.setEnabled(True)
-            # Populate with channel names if available, otherwise use indices
-            for i in range(num_channels):
-                if channel_names and i < len(channel_names):
-                    self.channel_combo.addItem(f"{i}: {channel_names[i]}")
-                else:
-                    self.channel_combo.addItem(f"Channel {i}")
-        else:
-            # Single channel - treated as if the selected channel (the only channel) is used
-            self.channel_combo.setEnabled(False)
-            self.channel_combo.addItem("Single channel")
-
-        self.channel_combo.blockSignals(False)
+    def _on_layer_changed(self, _text: str = "") -> None:
+        """Reset channel list when the user selects a different input layer."""
+        _populate_channel_combo(
+            self.channel_combo,
+            self._selected_layer(),
+            preserve_index=0,
+        )
 
     # ------------------------------------------------------------------
     def _load_default_model(self) -> None:
@@ -471,6 +510,11 @@ class PredictionTab(QWidget):
         overlap = self.overlap_spin.value()
         batch_size = self.batch_spin.value()
 
+        self._last_prediction_input = {
+            "layer_name": self.layer_combo.currentText(),
+            "channel_index": self.channel_combo.currentIndex(),
+        }
+
         print(
             f"[WIDGET] Starting prediction: image shape={image.shape}, patch_size={patch_size}, overlap={overlap}, batch_size={batch_size}"
         )
@@ -504,15 +548,29 @@ class PredictionTab(QWidget):
         self.progress.setValue(int(value * 100))
 
     def _on_prediction_finished(self, result: PredictionResult) -> None:
-        base_name = self.layer_combo.currentText() or "prediction"
+        input_layer = str(
+            self._last_prediction_input.get("layer_name", "")
+        ) or self.layer_combo.currentText() or "prediction"
+        channel_index = int(
+            self._last_prediction_input.get(
+                "channel_index", self.channel_combo.currentIndex()
+            )
+        )
+        mask_name = f"{input_layer}_mask"
+
         self.viewer.add_image(
             result.probability,
-            name=f"{base_name}_probability",
+            name=f"{input_layer}_probability",
             blending="additive",
             colormap="magenta",
         )
-        self.viewer.add_labels(result.mask, name=f"{base_name}_mask")
+        self.viewer.add_labels(result.mask, name=mask_name)
         self.status_label.setText("Prediction completed")
+        self.parent_widget.curation_tab.sync_from_prediction(
+            image_layer=input_layer,
+            channel_index=channel_index,
+            labels_layer=mask_name,
+        )
 
     def _on_prediction_error(self, message: str) -> None:
         show_error_dialog(
@@ -550,7 +608,7 @@ class PatchCurationTab(QWidget):
         layout.addWidget(self.ensure_layer_btn)
 
         self.feedback_label = QLabel(
-            "Draw rectangles (≥ 300×300) in the patch layer"
+            "Draw rectangles (≥ 256×256) in the patch layer"
         )
         layout.addWidget(self.feedback_label)
 
@@ -568,17 +626,19 @@ class PatchCurationTab(QWidget):
         layout.addStretch(1)
         self.setLayout(layout)
 
+        self.image_combo.currentTextChanged.connect(self._on_image_layer_changed)
         self.refresh_layers()
 
     def refresh_layers(self) -> None:
-        current_img = self.image_combo.currentText()
-        current_lbl = self.labels_combo.currentText()
+        previous_img = self.image_combo.currentText()
+        previous_lbl = self.labels_combo.currentText()
+        previous_channel = self.image_channel_combo.currentIndex()
 
         self.image_combo.blockSignals(True)
         self.image_combo.clear()
         for layer in self.parent_widget.get_image_layers():
             self.image_combo.addItem(layer.name)
-        idx = self.image_combo.findText(current_img)
+        idx = self.image_combo.findText(previous_img)
         if idx >= 0:
             self.image_combo.setCurrentIndex(idx)
         self.image_combo.blockSignals(False)
@@ -587,69 +647,65 @@ class PatchCurationTab(QWidget):
         self.labels_combo.clear()
         for layer in self.parent_widget.get_labels_layers():
             self.labels_combo.addItem(layer.name)
-        idx = self.labels_combo.findText(current_lbl)
+        idx = self.labels_combo.findText(previous_lbl)
         if idx >= 0:
             self.labels_combo.setCurrentIndex(idx)
         self.labels_combo.blockSignals(False)
 
-        # Update channel selection when layers refresh
-        self._on_image_layer_changed()
+        current_img = self.image_combo.currentText()
+        layer_changed = current_img != previous_img
+        _populate_channel_combo(
+            self.image_channel_combo,
+            self._selected_image_layer(),
+            preserve_index=None if layer_changed else previous_channel,
+        )
 
-    def _on_image_layer_changed(self) -> None:
-        """Update channel selection when image layer changes."""
-        layer_name = self.image_combo.currentText()
-        if not layer_name:
-            self.image_channel_combo.blockSignals(True)
-            self.image_channel_combo.clear()
-            self.image_channel_combo.setEnabled(False)
-            self.image_channel_combo.blockSignals(False)
-            return
+    def sync_from_prediction(
+        self,
+        *,
+        image_layer: str,
+        channel_index: int,
+        labels_layer: str,
+    ) -> None:
+        """Point curation controls at the layer/channel/mask used for prediction."""
+        self.image_combo.blockSignals(True)
+        image_idx = self.image_combo.findText(image_layer)
+        if image_idx >= 0:
+            self.image_combo.setCurrentIndex(image_idx)
+        self.image_combo.blockSignals(False)
 
+        image_layer_obj = self._selected_image_layer()
+        _populate_channel_combo(
+            self.image_channel_combo,
+            image_layer_obj,
+            preserve_index=channel_index,
+        )
+
+        self.labels_combo.blockSignals(True)
+        labels_idx = self.labels_combo.findText(labels_layer)
+        if labels_idx >= 0:
+            self.labels_combo.setCurrentIndex(labels_idx)
+        self.labels_combo.blockSignals(False)
+
+    def _selected_image_layer(self):
+        name = self.image_combo.currentText()
+        if not name:
+            return None
         try:
-            layer = self.viewer.layers[layer_name]
+            layer = self.viewer.layers[name]
         except KeyError:
-            return
+            return None
+        if layer.__class__.__name__ != "Image":
+            return None
+        return layer
 
-        data = np.asarray(layer.data)
-        # channel_names is stored directly in metadata (napari flattens nested structure)
-        channel_names = layer.metadata.get("channel_names")
-        channel_axis = layer.metadata.get("channel_axis", None)
-
-        self.image_channel_combo.blockSignals(True)
-        self.image_channel_combo.clear()
-
-        # Check if this is a multi-channel image
-        # Match the logic in extract_channel for consistency
-        # Single-channel images are treated as if the selected channel (the only channel) is used
-        is_multi_channel = False
-        num_channels = 0
-        if channel_axis is not None and channel_axis < data.ndim:
-            num_channels = data.shape[channel_axis]
-            is_multi_channel = num_channels > 1
-        elif channel_names and len(channel_names) > 1:
-            num_channels = len(channel_names)
-            is_multi_channel = num_channels > 1
-        elif data.ndim == 3 and data.shape[0] <= 10:
-            # 3D data with small first dimension - likely channels
-            num_channels = data.shape[0]
-            is_multi_channel = num_channels > 1
-
-        if is_multi_channel:
-            self.image_channel_combo.setEnabled(True)
-            # Populate with channel names if available, otherwise use indices
-            for i in range(num_channels):
-                if channel_names and i < len(channel_names):
-                    self.image_channel_combo.addItem(
-                        f"{i}: {channel_names[i]}"
-                    )
-                else:
-                    self.image_channel_combo.addItem(f"Channel {i}")
-        else:
-            # Single channel - treated as if the selected channel (the only channel) is used
-            self.image_channel_combo.setEnabled(False)
-            self.image_channel_combo.addItem("Single channel")
-
-        self.image_channel_combo.blockSignals(False)
+    def _on_image_layer_changed(self, _text: str = "") -> None:
+        """Reset channel list when the user selects a different image layer."""
+        _populate_channel_combo(
+            self.image_channel_combo,
+            self._selected_image_layer(),
+            preserve_index=0,
+        )
 
     def _ensure_shapes_layer(self) -> None:
         if (
@@ -702,7 +758,7 @@ class PatchCurationTab(QWidget):
             return
         if len(self.shapes_layer.data) == 0:
             self.feedback_label.setText(
-                "Draw rectangles (≥ 300×300) in the patch layer"
+                "Draw rectangles (≥ 256×256) in the patch layer"
             )
             return
 
@@ -729,7 +785,7 @@ class PatchCurationTab(QWidget):
             )
         else:
             self.feedback_label.setText(
-                "All patches too small – ensure ≥ 300×300"
+                "All patches too small – ensure ≥ 256×256"
             )
 
     def _commit_current_patch(self) -> None:
@@ -765,7 +821,7 @@ class PatchCurationTab(QWidget):
             QMessageBox.warning(
                 self,
                 "Patch too small",
-                "Please resize patch to at least 300×300",
+                "Please resize patch to at least 256×256",
             )
             return
 
@@ -817,7 +873,23 @@ class TrainingTab(QWidget):
         self.batch_spin.setValue(8)
         form.addRow("Batch size", self.batch_spin)
 
+        self.export_samples_spin = QSpinBox()
+        self.export_samples_spin.setRange(0, 1000)
+        self.export_samples_spin.setValue(25)
+        self.export_samples_spin.setSpecialValueText("All")
+        self.export_samples_spin.setToolTip(
+            "0 = export all augmented patches per region (can be very large)"
+        )
+        form.addRow("Export samples / region", self.export_samples_spin)
+
         layout.addLayout(form)
+
+        self.export_samples_btn = QPushButton("Export training samples…")
+        self.export_samples_btn.setToolTip(
+            "Temporary debug: save augmented image/mask TIFFs used for training"
+        )
+        self.export_samples_btn.clicked.connect(self._export_training_samples)
+        layout.addWidget(self.export_samples_btn)
 
         self.train_btn = QPushButton("Start training")
         self.train_btn.clicked.connect(self._start_training)
@@ -839,6 +911,52 @@ class TrainingTab(QWidget):
 
     def update_curated_count(self, count: int) -> None:
         self.info_label.setText(f"Curated patches: {count}")
+
+    def _export_training_samples(self) -> None:
+        if not self.parent_widget.curated_patches:
+            QMessageBox.warning(
+                self,
+                "No patches",
+                "Curate at least one patch before exporting samples.",
+            )
+            return
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder for training sample export",
+            str(Path.home()),
+        )
+        if not directory:
+            return
+
+        samples_per_region = self.export_samples_spin.value()
+        self.export_samples_btn.setEnabled(False)
+        self.log_output.append(f"Exporting training samples to {directory}…")
+
+        runner = self.executor.submit(
+            _run_export_training_samples,
+            self.parent_widget.curated_patches,
+            directory,
+            samples_per_region=samples_per_region,
+        )
+        runner.signals.progress.connect(self._on_training_progress)
+        runner.signals.result.connect(self._on_export_samples_result)
+        runner.signals.error.connect(self._on_export_samples_error)
+        runner.signals.finished.connect(self._on_export_samples_finished)
+
+    def _on_export_samples_result(self, path: str) -> None:
+        self.log_output.append(f"Training samples exported to {path}")
+
+    def _on_export_samples_error(self, message: str) -> None:
+        show_error_dialog(
+            self,
+            "Export failed",
+            message,
+            log_targets=[self.log_output],
+        )
+
+    def _on_export_samples_finished(self) -> None:
+        self.export_samples_btn.setEnabled(True)
 
     def _start_training(self) -> None:
         if not self.parent_widget.curated_patches:
@@ -995,6 +1113,8 @@ class ModelIOTab(QWidget):
                         image=patch.image,
                         labels=patch.labels,
                         origin=patch.origin,
+                        image_norm_min=patch.image_norm_min,
+                        image_norm_max=patch.image_norm_max,
                     )
                     training_paths.append(str(patch_file))
 
@@ -1083,3 +1203,21 @@ def run_training(
         progress_callback=progress_callback,
         message_callback=message_callback,
     )
+
+
+def _run_export_training_samples(
+    patches: List[CuratedPatch],
+    output_dir: str,
+    *,
+    samples_per_region: int,
+    progress_callback=None,
+) -> str:
+    from .training import export_training_samples
+
+    path = export_training_samples(
+        patches,
+        output_dir,
+        samples_per_region=samples_per_region,
+        progress_callback=progress_callback,
+    )
+    return str(path)
